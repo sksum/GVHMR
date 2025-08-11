@@ -325,10 +325,24 @@ if __name__ == "__main__":
         data_time = data["length"] / 30
         Log.info(f"[HMR4D] Elapsed: {Log.sync_time() - tic:.2f}s for data-length={data_time:.1f}s")
         torch.save(pred, paths.hmr4d_results)
-
+        pred_np = {}
+        pred_np['smpl_params_global'] = {}
+        pred_np['smpl_params_incam'] = {}
+        pred_np['smpl_params_global']['body_pose'] = pred['smpl_params_global']['body_pose'].cpu().numpy()
+        pred_np['smpl_params_global']['global_orient'] = pred['smpl_params_global']['global_orient'].cpu().numpy()
+        pred_np['smpl_params_global']['transl'] = pred['smpl_params_global']['transl'].cpu().numpy()
+        pred_np['smpl_params_global']['betas'] = pred['smpl_params_global']['betas'].cpu().numpy()
+        
+        pred_np['smpl_params_incam']['body_pose'] = pred['smpl_params_global']['body_pose'].cpu().numpy()
+        pred_np['smpl_params_incam']['global_orient'] = pred['smpl_params_global']['global_orient'].cpu().numpy()
+        pred_np['smpl_params_incam']['transl'] = pred['smpl_params_global']['transl'].cpu().numpy()
+        pred_np['smpl_params_incam']['betas'] = pred['smpl_params_global']['betas'].cpu().numpy()
+        import pickle
+        with open(paths.hmr4d_results+".pkl", 'wb') as handle:
+            pickle.dump(pred_np, handle, protocol=pickle.HIGHEST_PROTOCOL)
     # ===== Render ===== #
-    render_incam(cfg)
-    render_global(cfg)
-    if not Path(paths.incam_global_horiz_video).exists():
-        Log.info("[Merge Videos]")
-        merge_videos_horizontal([paths.incam_video, paths.global_video], paths.incam_global_horiz_video)
+    # render_incam(cfg)
+    # render_global(cfg)
+    # if not Path(paths.incam_global_horiz_video).exists():
+    #     Log.info("[Merge Videos]")
+    #     merge_videos_horizontal([paths.incam_video, paths.global_video], paths.incam_global_horiz_video)
