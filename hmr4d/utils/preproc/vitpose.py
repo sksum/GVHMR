@@ -60,7 +60,7 @@ class VitPoseExtractor:
 
             else:  # postprocess from mmpose
                 bbx_xys_batch = bbx_xys[j : j + batch_size]
-                heatmap = heatmap.clone().cpu().numpy()
+                heatmap = heatmap.float().clone().cpu().numpy()
                 center = bbx_xys_batch[:, :2].numpy()
                 scale = (torch.cat((bbx_xys_batch[:, [2]] * 24 / 32, bbx_xys_batch[:, [2]]), dim=1) / 200).numpy()
                 preds, maxvals = keypoints_from_heatmaps(heatmaps=heatmap, center=center, scale=scale, use_udp=True)
