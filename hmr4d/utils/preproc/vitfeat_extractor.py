@@ -82,7 +82,8 @@ class Extractor:
             imgs_batch = imgs[j : j + batch_size]
 
             with torch.no_grad():
-                feature = self.extractor({"img": imgs_batch})
+                with torch.cuda.amp.autocast(enabled=True):
+                    feature = self.extractor({"img": imgs_batch})
                 features.append(feature.detach().cpu())
 
         features = torch.cat(features, dim=0).clone()  # (F, 1024)

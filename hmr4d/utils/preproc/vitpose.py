@@ -35,13 +35,14 @@ class VitPoseExtractor:
         for j in tqdm(range(0, L, batch_size), desc="ViTPose", leave=self.tqdm_leave):
             # Heat map
             imgs_batch = imgs[j : j + batch_size, :, :, 32:224].cuda()
-            if self.flip_test:
-                heatmap, heatmap_flipped = self.pose(torch.cat([imgs_batch, imgs_batch.flip(3)], dim=0)).chunk(2)
-                heatmap_flipped = flip_heatmap_coco17(heatmap_flipped)
-                heatmap = (heatmap + heatmap_flipped) * 0.5
-                del heatmap_flipped
-            else:
-                heatmap = self.pose(imgs_batch.clone())  # (B, J, 64, 48)
+            with torch.cuda.amp.autocast(enabled=True):
+                if self.flip_test:
+                    heatmap, heatmap_flipped = self.pose(torch.cat([imgs_batch, imgs_batch.flip(3)], dim=0)).chunk(2)
+                    heatmap_flipped = flip_heatmap_coco17(heatmap_flipped)
+                    heatmap = (heatmap + heatmap_flipped) * 0.5
+                    del heatmap_flipped
+                else:
+                    heatmap = self.pose(imgs_batch.clone())  # (B, J, 64, 48)
 
             if False:
                 # Get joint
