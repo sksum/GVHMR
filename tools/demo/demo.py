@@ -177,13 +177,16 @@ def load_data_dict(cfg):
     length, width, height = get_video_lwh(cfg.video_path)
     if cfg.static_cam:
         R_w2c = torch.eye(3).repeat(length, 1, 1)
+        t_w2c = None  # Will be computed after prediction for static mode
     else:
         traj = torch.load(cfg.paths.slam)
         if cfg.use_dpvo:  # DPVO
             traj_quat = torch.from_numpy(traj[:, [6, 3, 4, 5]])
             R_w2c = quaternion_to_matrix(traj_quat).mT
+            t_w2c = torch.from_numpy(traj[:, :3])  # DPVO stores translation first 3 columns
         else:  # SimpleVO
             R_w2c = torch.from_numpy(traj[:, :3, :3])
+            t_w2c = torch.from_numpy(traj[:, :3, 3])  # Extract translation from T_w2c
     if cfg.f_mm is not None:
         K_fullimg = create_camera_sensor(width, height, cfg.f_mm)[2].repeat(length, 1, 1)
     else:
@@ -196,6 +199,8 @@ def load_data_dict(cfg):
         "K_fullimg": K_fullimg,
         "cam_angvel": compute_cam_angvel(R_w2c),
         "f_imgseq": torch.load(paths.vit_features),
+        "R_w2c": R_w2c,           # Camera rotation
+        "t_w2c": t_w2c,            # Camera translation (None for static mode)
     }
     return data
 
@@ -324,19 +329,56 @@ if __name__ == "__main__":
         pred = detach_to_cpu(pred)
         data_time = data["length"] / 30
         Log.info(f"[HMR4D] Elapsed: {Log.sync_time() - tic:.2f}s for data-length={data_time:.1f}s")
+
+        # Compute camera position for static mode
+        if cfg.static_cam or data.get('t_w2c') is None:
+            Log.info("[Camera] Computing camera position from mesh bounds (static mode)")
+            smplx = make_smplx("supermotion").cuda()
+            smplx2smpl = torch.load("hmr4d/utils/body_model/smplx2smpl_sparse.pt").cuda()
+            with torch.no_grad():
+                smplx_out = smplx(**{k: v.cuda() for k, v in pred['smpl_params_global'].items()})
+                pred_verts = torch.stack([torch.matmul(smplx2smpl, v_) for v_ in smplx_out.vertices])
+
+            # Compute camera position from mesh bounds
+            R_c2w, t_c2w, _ = get_global_cameras_static(
+                pred_verts.cpu(),
+                beta=2.0,
+                cam_height_degree=20,
+                target_center_height=1.0,
+                device='cpu'
+            )
+
+            # For static mode: use single camera for all frames
+            length = pred['smpl_params_global']['transl'].shape[0]
+            pred['R_w2c'] = R_c2w.mT.repeat(length, 1, 1)  # Camera-to-world to world-to-camera
+            pred['t_w2c'] = t_c2w.repeat(length, 1)  # Camera translation
+            pred['K_fullimg'] = data.get('K_fullimg', pred.get('K_fullimg'))
+        else:
+            # For VO/SLAM mode, use the trajectory data
+            pred['R_w2c'] = data['R_w2c']
+            pred['t_w2c'] = data['t_w2c']
+            pred['K_fullimg'] = data.get('K_fullimg', pred.get('K_fullimg'))
+
         torch.save(pred, paths.hmr4d_results)
         pred_np = {}
         pred_np['smpl_params_global'] = {}
         pred_np['smpl_params_incam'] = {}
+        pred_np['camera_params'] = {}  # NEW: Camera parameters section
         pred_np['smpl_params_global']['body_pose'] = pred['smpl_params_global']['body_pose'].cpu().numpy()
         pred_np['smpl_params_global']['global_orient'] = pred['smpl_params_global']['global_orient'].cpu().numpy()
         pred_np['smpl_params_global']['transl'] = pred['smpl_params_global']['transl'].cpu().numpy()
         pred_np['smpl_params_global']['betas'] = pred['smpl_params_global']['betas'].cpu().numpy()
-        
+
         pred_np['smpl_params_incam']['body_pose'] = pred['smpl_params_global']['body_pose'].cpu().numpy()
         pred_np['smpl_params_incam']['global_orient'] = pred['smpl_params_global']['global_orient'].cpu().numpy()
         pred_np['smpl_params_incam']['transl'] = pred['smpl_params_global']['transl'].cpu().numpy()
         pred_np['smpl_params_incam']['betas'] = pred['smpl_params_global']['betas'].cpu().numpy()
+
+        # NEW: Add camera parameters
+        pred_np['camera_params']['R_w2c'] = pred['R_w2c'].cpu().numpy()  # (F, 3, 3)
+        pred_np['camera_params']['t_w2c'] = pred['t_w2c'].cpu().numpy()  # (F, 3)
+        pred_np['camera_params']['K_fullimg'] = pred['K_fullimg'][0].cpu().numpy() if pred['K_fullimg'].ndim == 3 else pred['K_fullimg'].cpu().numpy()  # (3, 3)
+
         import pickle
         with open(paths.hmr4d_results+".pkl", 'wb') as handle:
             pickle.dump(pred_np, handle, protocol=pickle.HIGHEST_PROTOCOL)
