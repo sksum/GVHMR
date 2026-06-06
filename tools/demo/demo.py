@@ -23,7 +23,7 @@ from hmr4d.utils.vis.cv2_utils import draw_bbx_xyxy_on_image_batch, draw_coco17_
 from hmr4d.utils.preproc import Tracker, Extractor, VitPoseExtractor, SimpleVO
 
 from hmr4d.utils.geo.hmr_cam import get_bbx_xys_from_xyxy, estimate_K, convert_K_to_K4, create_camera_sensor
-from hmr4d.utils.geo_transform import compute_cam_angvel
+from hmr4d.utils.geo_transform import compute_cam_angvel, axis_angle_to_matrix
 from hmr4d.model.gvhmr.gvhmr_pl_demo import DemoPL
 from hmr4d.utils.net_utils import detach_to_cpu, to_cuda
 from hmr4d.utils.smplx_utils import make_smplx
@@ -205,6 +205,37 @@ def load_data_dict(cfg):
     return data
 
 
+def compute_camera_from_incam_global(pred_smpl_params_incam, pred_smpl_params_global):
+    """
+    Compute camera-to-world transform from incam/global relationship (pp_static_joint_cam approach).
+    Returns: R_c2w (camera-to-world rotation), t_c2w (camera position)
+
+    Based on: hmr4d/model/gvhmr/utils/postprocess.py pp_static_joint_cam()
+    Formula:
+        R_c2w = R_gv @ R_c.mT
+        t_c2w = P_w_pelvis - R_c2w @ P_c_pelvis
+    """
+    # Get first frame orientations (axis-angle)
+    global_orient = pred_smpl_params_global['global_orient'][0]  # (3,)
+    incam_orient = pred_smpl_params_incam['global_orient'][0]    # (3,)
+
+    # Convert to rotation matrices
+    R_gv = axis_angle_to_matrix(global_orient.unsqueeze(0))[0]  # (3, 3)
+    R_c = axis_angle_to_matrix(incam_orient.unsqueeze(0))[0]    # (3, 3)
+
+    # Camera-to-world rotation: R_c2w = R_gv @ R_c.T
+    R_c2w = R_gv @ R_c.mT  # (3, 3)
+
+    # Get pelvis positions (transl is pelvis in SMPL)
+    P_w_pelvis = pred_smpl_params_global['transl'][0]  # (3,)
+    P_c_pelvis = pred_smpl_params_incam['transl'][0]    # (3,)
+
+    # Camera position: t_c2w = P_w_pelvis - R_c2w @ P_c_pelvis
+    t_c2w = P_w_pelvis - R_c2w @ P_c_pelvis  # (3,)
+
+    return R_c2w, t_c2w
+
+
 def render_incam(cfg):
     incam_video_path = Path(cfg.paths.incam_video)
     if incam_video_path.exists():
@@ -332,20 +363,12 @@ if __name__ == "__main__":
 
         # Compute camera position for static mode
         if cfg.static_cam or data.get('t_w2c') is None:
-            Log.info("[Camera] Computing camera position from mesh bounds (static mode)")
-            smplx = make_smplx("supermotion").cuda()
-            smplx2smpl = torch.load("hmr4d/utils/body_model/smplx2smpl_sparse.pt").cuda()
-            with torch.no_grad():
-                smplx_out = smplx(**{k: v.cuda() for k, v in pred['smpl_params_global'].items()})
-                pred_verts = torch.stack([torch.matmul(smplx2smpl, v_) for v_ in smplx_out.vertices])
+            Log.info("[Camera] Computing camera position from incam/global relationship (pp_static_joint_cam)")
 
-            # Compute camera position from mesh bounds
-            R_c2w, t_c2w, _ = get_global_cameras_static(
-                pred_verts.cpu(),
-                beta=2.0,
-                cam_height_degree=20,
-                target_center_height=1.0,
-                device='cpu'
+            # Use incam/global relationship for more accurate camera position
+            R_c2w, t_c2w = compute_camera_from_incam_global(
+                pred['smpl_params_incam'],
+                pred['smpl_params_global']
             )
 
             # For static mode: use single camera for all frames
@@ -369,10 +392,10 @@ if __name__ == "__main__":
         pred_np['smpl_params_global']['transl'] = pred['smpl_params_global']['transl'].cpu().numpy()
         pred_np['smpl_params_global']['betas'] = pred['smpl_params_global']['betas'].cpu().numpy()
 
-        pred_np['smpl_params_incam']['body_pose'] = pred['smpl_params_global']['body_pose'].cpu().numpy()
-        pred_np['smpl_params_incam']['global_orient'] = pred['smpl_params_global']['global_orient'].cpu().numpy()
-        pred_np['smpl_params_incam']['transl'] = pred['smpl_params_global']['transl'].cpu().numpy()
-        pred_np['smpl_params_incam']['betas'] = pred['smpl_params_global']['betas'].cpu().numpy()
+        pred_np['smpl_params_incam']['body_pose'] = pred['smpl_params_incam']['body_pose'].cpu().numpy()
+        pred_np['smpl_params_incam']['global_orient'] = pred['smpl_params_incam']['global_orient'].cpu().numpy()
+        pred_np['smpl_params_incam']['transl'] = pred['smpl_params_incam']['transl'].cpu().numpy()
+        pred_np['smpl_params_incam']['betas'] = pred['smpl_params_incam']['betas'].cpu().numpy()
 
         # NEW: Add camera parameters
         pred_np['camera_params']['R_w2c'] = pred['R_w2c'].cpu().numpy()  # (F, 3, 3)
