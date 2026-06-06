@@ -7,7 +7,7 @@ from hmr4d.utils.pylogger import Log
 import hydra
 from hydra import initialize_config_module, compose
 from pathlib import Path
-from pytorch3d.transforms import quaternion_to_matrix
+from pytorch3d.transforms import quaternion_to_matrix, axis_angle_to_matrix
 
 from hmr4d.configs import register_store_gvhmr
 from hmr4d.utils.video_io_utils import (
@@ -23,7 +23,7 @@ from hmr4d.utils.vis.cv2_utils import draw_bbx_xyxy_on_image_batch, draw_coco17_
 from hmr4d.utils.preproc import Tracker, Extractor, VitPoseExtractor, SimpleVO
 
 from hmr4d.utils.geo.hmr_cam import get_bbx_xys_from_xyxy, estimate_K, convert_K_to_K4, create_camera_sensor
-from hmr4d.utils.geo_transform import compute_cam_angvel, axis_angle_to_matrix
+from hmr4d.utils.geo_transform import compute_cam_angvel
 from hmr4d.model.gvhmr.gvhmr_pl_demo import DemoPL
 from hmr4d.utils.net_utils import detach_to_cpu, to_cuda
 from hmr4d.utils.smplx_utils import make_smplx
