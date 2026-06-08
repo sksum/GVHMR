@@ -406,8 +406,8 @@ if __name__ == "__main__":
         with open(paths.hmr4d_results+".pkl", 'wb') as handle:
             pickle.dump(pred_np, handle, protocol=pickle.HIGHEST_PROTOCOL)
     # ===== Render ===== #
-    render_incam(cfg)
-    render_global(cfg)
-    if not Path(paths.incam_global_horiz_video).exists():
-        Log.info("[Merge Videos]")
-        merge_videos_horizontal([paths.incam_video, paths.global_video], paths.incam_global_horiz_video)
+    # render_incam(cfg)
+    #  ender_global(cfg)
+    # if not Path(paths.incam_global_horiz_video).exists():
+      #   Log.info("[Merge Videos]")
+       # : merge_videos_horizontal([paths.incam_video, paths.global_video], paths.incam_global_horiz_video)
